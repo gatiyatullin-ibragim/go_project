@@ -5,21 +5,13 @@ import (
 	"strings"
 )
 
-// DefaultTriggerWords are the (case-insensitive) words that raise an alert.
 var DefaultTriggerWords = []string{"timeout", "failed", "panic"}
 
-// Processor validates tasks, runs the log analysis and persists the outcome.
-//
-// Design note: it holds a TaskRepository (interface), not *MemoryTaskRepository,
-// and is itself used through a pointer so one configured instance is shared
-// rather than copied.
 type Processor struct {
 	repo     TaskRepository
-	triggers []string // lower-case, non-empty
+	triggers []string
 }
 
-// NewProcessor creates a processor. If no trigger words are given,
-// DefaultTriggerWords are used.
 func NewProcessor(repo TaskRepository, triggerWords ...string) (*Processor, error) {
 	if repo == nil {
 		return nil, ErrNilRepository
@@ -37,7 +29,6 @@ func NewProcessor(repo TaskRepository, triggerWords ...string) (*Processor, erro
 	return &Processor{repo: repo, triggers: triggers}, nil
 }
 
-// Submit creates a Pending task and stores it.
 func (p *Processor) Submit(id string, logs []string) (*Task, error) {
 	task, err := NewTask(id, logs)
 	if err != nil {
@@ -49,7 +40,6 @@ func (p *Processor) Submit(id string, logs []string) (*Task, error) {
 	return task, nil
 }
 
-// ProcessByID loads a stored task, processes it and returns the updated task.
 func (p *Processor) ProcessByID(id string) (*Task, error) {
 	task, err := p.repo.GetByID(id)
 	if err != nil {
@@ -61,21 +51,6 @@ func (p *Processor) ProcessByID(id string) (*Task, error) {
 	return task, nil
 }
 
-// Process runs a Pending task through its lifecycle:
-//
-//	Pending -> Processing -> Completed
-//	Pending -> Processing -> Failed     (invalid input)
-//
-// Errors:
-//   - ErrInvalidTransition: the task is not Pending (e.g. already Completed).
-//   - ErrEmptyBatch / ErrInvalidLogLine: the input was rejected; the task is
-//     stored as Failed with FailureReason set.
-//   - ErrTaskNotFound: the task was never created in the repository.
-//
-// The work is done on a private copy, and the caller's task is updated only
-// after the repository accepted the new state. If persistence fails, the
-// caller's task is left exactly as it was instead of drifting out of sync
-// with storage.
 func (p *Processor) Process(task *Task) error {
 	if task == nil {
 		return ErrNilTask
@@ -83,12 +58,10 @@ func (p *Processor) Process(task *Task) error {
 
 	work := task.Clone()
 
-	// Guard: also what blocks Completed/Failed (terminal) and Processing tasks.
 	if err := work.TransitionTo(StateProcessing); err != nil {
 		return err
 	}
 
-	// Validate before any business logic runs.
 	entries, err := ParseBatch(work.Logs)
 	if err != nil {
 		return p.reject(task, work, err)
@@ -110,7 +83,6 @@ func (p *Processor) Process(task *Task) error {
 	return nil
 }
 
-// reject records a validation failure: Processing -> Failed, then persist.
 func (p *Processor) reject(task, work *Task, cause error) error {
 	if err := work.TransitionTo(StateFailed); err != nil {
 		return err
@@ -123,17 +95,13 @@ func (p *Processor) reject(task, work *Task, cause error) error {
 	return fmt.Errorf("task %q rejected: %w", task.ID, cause)
 }
 
-// analyze is the pure business logic: it counts levels and raises alerts.
-// A line produces one alert per trigger word it contains. Matching is a
-// case-insensitive substring search on the message only, so the level tag
-// itself (e.g. "ERROR") can never trigger an alert.
 func (p *Processor) analyze(entries []LogEntry) *Result {
 	res := &Result{
 		TotalLines: len(entries),
 		Stats:      make(map[LogLevel]int, len(AllLevels)),
 	}
 	for _, level := range AllLevels {
-		res.Stats[level] = 0 // report zeros explicitly instead of omitting keys
+		res.Stats[level] = 0
 	}
 
 	for i, e := range entries {

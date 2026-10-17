@@ -6,8 +6,6 @@ import (
 	"testing"
 )
 
-// sampleLogs: 2 INFO, 1 WARN, 2 ERROR; alerts on lines 2 (timeout),
-// 4 (failed) and 5 (panic, matched case-insensitively).
 var sampleLogs = []string{
 	"[INFO] 2026-10-15 Service started",
 	"[ERROR] 2026-10-15 DB connection timeout",
@@ -25,8 +23,6 @@ func newTestEnv(t *testing.T) (*MemoryTaskRepository, *Processor) {
 	}
 	return repo, proc
 }
-
-// ---------------------------------------------------------------- parsing
 
 func TestParseLogLine(t *testing.T) {
 	tests := []struct {
@@ -98,8 +94,6 @@ func TestParseBatch(t *testing.T) {
 		})
 	}
 }
-
-// ------------------------------------------------------ creation / retrieval
 
 func TestNewTask(t *testing.T) {
 	t.Run("success", func(t *testing.T) {
@@ -174,8 +168,6 @@ func TestGetNonExistentTask(t *testing.T) {
 	}
 }
 
-// -------------------------------------------------------------- processing
-
 func TestProcessSuccess(t *testing.T) {
 	repo, proc := newTestEnv(t)
 	task, _ := proc.Submit("t1", sampleLogs)
@@ -184,7 +176,6 @@ func TestProcessSuccess(t *testing.T) {
 		t.Fatalf("Process: %v", err)
 	}
 
-	// The caller's task and the stored task must both reflect the outcome.
 	stored, err := repo.GetByID("t1")
 	if err != nil {
 		t.Fatalf("GetByID: %v", err)
@@ -295,7 +286,7 @@ func TestProcessNilTask(t *testing.T) {
 
 func TestProcessTaskNotInRepositoryLeavesCallerUntouched(t *testing.T) {
 	_, proc := newTestEnv(t)
-	orphan, _ := NewTask("orphan", sampleLogs) // never stored
+	orphan, _ := NewTask("orphan", sampleLogs)
 
 	err := proc.Process(orphan)
 	if !errors.Is(err, ErrTaskNotFound) {
@@ -305,8 +296,6 @@ func TestProcessTaskNotInRepositoryLeavesCallerUntouched(t *testing.T) {
 		t.Errorf("caller's task changed despite failed persistence: %+v", orphan)
 	}
 }
-
-// ------------------------------------------------------- state transitions
 
 func TestCanTransitionTo(t *testing.T) {
 	tests := []struct {
@@ -347,7 +336,7 @@ func TestCanTransitionTo(t *testing.T) {
 
 func TestTransitionToLeavesStateOnError(t *testing.T) {
 	task, _ := NewTask("t1", sampleLogs)
-	err := task.TransitionTo(StateCompleted) // Pending -> Completed is illegal
+	err := task.TransitionTo(StateCompleted)
 	if !errors.Is(err, ErrInvalidTransition) {
 		t.Fatalf("err = %v, want ErrInvalidTransition", err)
 	}
@@ -396,8 +385,6 @@ func TestCannotProcessFailedOrInFlightTask(t *testing.T) {
 	}
 }
 
-// ------------------------------------------------- isolation / independence
-
 func TestMultipleTasksDoNotOverwriteEachOther(t *testing.T) {
 	repo, proc := newTestEnv(t)
 
@@ -411,7 +398,6 @@ func TestMultipleTasksDoNotOverwriteEachOther(t *testing.T) {
 		}
 	}
 
-	// Process A and C only; B must remain untouched.
 	for _, id := range []string{"A", "C"} {
 		if _, err := proc.ProcessByID(id); err != nil {
 			t.Fatalf("ProcessByID %s: %v", id, err)
@@ -432,7 +418,6 @@ func TestMultipleTasksDoNotOverwriteEachOther(t *testing.T) {
 		t.Errorf("task B was affected by others: %+v", b)
 	}
 
-	// Now process B: A and C must not change.
 	if _, err := proc.ProcessByID("B"); err != nil {
 		t.Fatalf("ProcessByID B: %v", err)
 	}
@@ -451,7 +436,6 @@ func TestRepositoryStoresIndependentCopies(t *testing.T) {
 	repo, proc := newTestEnv(t)
 	task, _ := proc.Submit("t1", sampleLogs)
 
-	// Mutating the caller's task without Save must not change stored data.
 	task.Logs[0] = "garbage"
 	task.State = StateFailed
 
@@ -460,14 +444,12 @@ func TestRepositoryStoresIndependentCopies(t *testing.T) {
 		t.Fatalf("stored task aliased the caller's task: %+v", stored)
 	}
 
-	// Mutating a retrieved task must not change stored data either.
 	stored.Logs[0] = "garbage"
 	again, _ := repo.GetByID("t1")
 	if again.Logs[0] != sampleLogs[0] {
 		t.Errorf("GetByID returned a reference into the store")
 	}
 
-	// A completed result must be deep-copied too (maps/slices are references).
 	fresh, _ := proc.Submit("t2", sampleLogs)
 	if err := proc.Process(fresh); err != nil {
 		t.Fatal(err)

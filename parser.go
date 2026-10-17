@@ -6,26 +6,18 @@ import (
 	"time"
 )
 
-// dateLayout is the date format expected in every log line.
 const dateLayout = "2006-01-02"
 
-// LogEntry is a successfully parsed log line.
 type LogEntry struct {
 	Level   LogLevel
 	Date    time.Time
 	Message string
 }
 
-// invalidLine builds an error that wraps ErrInvalidLogLine with a reason.
 func invalidLine(format string, args ...any) error {
 	return fmt.Errorf("%w: %s", ErrInvalidLogLine, fmt.Sprintf(format, args...))
 }
 
-// ParseLogLine parses a line shaped like:
-//
-//	[LEVEL] YYYY-MM-DD message text
-//
-// LEVEL must be exactly INFO, WARN or ERROR (upper case).
 func ParseLogLine(line string) (LogEntry, error) {
 	line = strings.TrimSpace(line)
 	if line == "" {
@@ -66,9 +58,6 @@ func ParseLogLine(line string) (LogEntry, error) {
 	return LogEntry{Level: level, Date: date, Message: message}, nil
 }
 
-// ParseBatch validates and parses a whole batch. It is all-or-nothing: the
-// first bad line rejects the entire batch, and the error names that line
-// (1-based) so the caller can find it.
 func ParseBatch(logs []string) ([]LogEntry, error) {
 	if len(logs) == 0 {
 		return nil, ErrEmptyBatch
